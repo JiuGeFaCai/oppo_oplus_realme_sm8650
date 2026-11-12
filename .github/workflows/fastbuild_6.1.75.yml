@@ -299,8 +299,13 @@ jobs:
             cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
             cd ./common
-            patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+            patch --batch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch
             patch -p1 -N -F 3 < 69_hide_stuff.patch || true
+            if [[ "${{ inputs.ksu_type }}" == "bakasu" || "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+              # BakaSU 使用 SELinux 回调接口，不提供旧 SUSFS 补丁引用的 fake_state。
+              curl -fLSs --retry 3 "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/other_patch/bakasu-susfs-selinux-6.1.patch" -o bakasu-susfs-selinux-6.1.patch
+              patch --batch --forward -p1 < bakasu-susfs-selinux-6.1.patch
+            fi
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
@@ -381,8 +386,12 @@ jobs:
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
           #禁用 defconfig 检查
           sed -i 's/check_defconfig//' ./common/build.config.gki
-          #跳过将uapi标准头安装到 usr/include 目录的不必要操作，节省编译时间
-          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          # BakaSU preinit 依赖 UAPI 头文件，由内核 prepare 阶段提前生成。
+          if [[ "${{ inputs.ksu_type }}" == "bakasu" || "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            echo "CONFIG_HEADERS_INSTALL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          else
+            echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
           # 应用 CVE_2026_43499 修复补丁
           cd common
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/cve-2026-43499-rtmutex-6.1.patch
